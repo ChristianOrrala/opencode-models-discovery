@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/index.ts"],
+  "sourcesContent": ["import { combinedPlugin, ModelDiscoveryPlugin, setupV2 } from './runtime.js'\n\nexport { ModelDiscoveryPlugin, setupV2 }\nexport default combinedPlugin\n"],
+  "mappings": "AAAA,SAAS,gBAAgB,sBAAsB,eAAe;AAG9D,IAAO,gBAAQ;",
+  "names": []
+}

@@ -9,6 +9,13 @@
 
 > Discover models from OpenAI-compatible providers and add them to OpenCode automatically.
 
+> [!NOTE]
+> This is a fork of [yuhp/opencode-models-discovery](https://github.com/yuhp/opencode-models-discovery). The `effort-levels` branch offers every effort level models.dev lists for a model, such as `xhigh` and `max`, and commits `dist/` so it can be installed from git:
+>
+> ```json
+> { "plugins": ["opencode-models-discovery@git+https://github.com/ChristianOrrala/opencode-models-discovery.git#effort-levels"] }
+> ```
+
 This plugin queries a provider's model endpoint, applies optional filters, and injects the discovered models into OpenCode. It supports OpenCode v2 as the primary integration and keeps a separate OpenCode v1 adapter for legacy configurations.
 
 ## Features
