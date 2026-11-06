@@ -34,7 +34,7 @@ It will:
 
 1. Create `release/vX.Y.Z` from the selected source branch.
 2. Bump `package.json` to `X.Y.Z`.
-3. Run `npm run build`.
+3. Run `npm run build:all`.
 4. Commit the version bump.
 5. Push the release branch.
 6. Open a PR from `release/vX.Y.Z` to `main`.
@@ -49,7 +49,7 @@ bun scripts/release.ts publish
 
 It will:
 
-1. Run `npm run build`.
+1. Run `npm run build:all`.
 2. Create and push the `vX.Y.Z` git tag if it does not already exist.
 3. Create a GitHub release with generated release notes.
 4. Publish `opencode-models-discovery@X.Y.Z` to npm if that version does not already exist.

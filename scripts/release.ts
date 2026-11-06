@@ -235,7 +235,7 @@ function prepareRelease(versionType: string): void {
 
 ## Validation
 
-- npm run build`
+- npm run build:all`
 
   runCommand('git', ['push', '--set-upstream', 'origin', branchName], 'Pushing release branch')
   runCommand(
