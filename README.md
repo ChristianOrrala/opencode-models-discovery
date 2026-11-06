@@ -15,6 +15,8 @@
 > ```json
 > { "plugins": ["opencode-models-discovery@git+https://github.com/ChristianOrrala/opencode-models-discovery.git#effort-levels"] }
 > ```
+>
+> After changing `src/`, run `npm run compile` and commit `dist/`. The full build script is `build:all` here, because a script named `build` makes npm prepare the package on a git install, and that step fails inside OpenCode.
 
 This plugin queries a provider's model endpoint, applies optional filters, and injects the discovered models into OpenCode. It supports OpenCode v2 as the primary integration and keeps a separate OpenCode v1 adapter for legacy configurations.
 
