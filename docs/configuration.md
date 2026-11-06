@@ -362,7 +362,7 @@ The plugin currently supports ten model info formats:
 | `"aiproxy"` | AIProxy's discovered `/models` entries plus models.dev | No | Maps inline AIProxy limits, pricing, and declared effort tiers; models.dev supplies general metadata |
 | `"bifrost"` | Fields in Bifrost's `/v1/models` response | No | Reads Bifrost inline limits, modalities, and base pricing when present |
 | `"litellm"` | Provider-specific model info endpoint | No | Uses `/v1/model/info` by default; set `modelInfoEndpoint` to override it |
-| `"models.dev"` | `https://models.dev/models.json` | No | Uses the public models.dev metadata index |
+| `"models.dev"` | `https://models.dev/models.json`, plus `https://models.dev/api.json` for effort levels | No | Uses the public models.dev metadata index. A model that lists effort levels gets one variant per level; a reasoning model that lists none gets `low`, `medium` and `high` |
 | `"vllm"` | Fields in the provider's `/v1/models` response | No | Reads vLLM-style `max_model_len` when present |
 | `"lmstudio"` | LM Studio 0.4.0+ `/api/v1/models` inventory | No | Uses `/api/v1/models` by default; set `modelInfoEndpoint` for another path |
 | `"llama-swap"` | Fields in llama-swap's `/v1/models` response | No | Reads inline context, modalities, and function-calling metadata when present |

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { fetchModelsDevData, lookupModelsDevData, modelsDevTestUtils } from '../src/utils/models-dev-fetcher.ts'
+import { fetchModelsDevData, lookupModelsDevData, MODELS_DEV_CATALOG_URL, modelsDevTestUtils } from '../src/utils/models-dev-fetcher.ts'
 
 describe('models.dev fetcher', () => {
   beforeEach(() => {
@@ -158,7 +158,106 @@ describe('models.dev fetcher', () => {
 
     expect(defaultModels.has('test/default-model')).toBe(true)
     expect(mirrorModels.has('test/mirror-model')).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // The default URL also reads api.json for effort levels; the second mirror call comes from the cache.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     fetchMock.mockRestore()
+  })
+
+  describe('effort levels from api.json', () => {
+    const levels = [{ type: 'effort', values: ['low', 'xhigh', 'max'] }]
+    const flat = {
+      'openai/gpt-6.1-terra': { id: 'openai/gpt-6.1-terra', reasoning: true, limit: { context: 1_050_000 } },
+      'acme/other': { id: 'acme/other', reasoning: true },
+    }
+    const catalog = {
+      openai: { models: { 'gpt-6.1-terra': { id: 'gpt-6.1-terra', reasoning_options: levels } } },
+      // Other providers list the same model, some with other levels. These must not be used or added.
+      azure: { models: { 'gpt-6.1-terra': { id: 'gpt-6.1-terra', reasoning_options: [{ type: 'effort', values: ['low'] }] } } },
+      openrouter: { models: { 'openai/gpt-6.1-terra': { id: 'openai/gpt-6.1-terra', reasoning_options: [{ type: 'effort', values: ['high'] }] } } },
+    }
+
+    function mockFetch(catalogResponse: () => Promise<Response>) {
+      return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        if (String(url) === MODELS_DEV_CATALOG_URL) return catalogResponse()
+        return new Response(JSON.stringify(flat))
+      })
+    }
+
+    it('adds them by exact provider and model, without adding models', async () => {
+      const fetchMock = mockFetch(async () => new Response(JSON.stringify(catalog)))
+
+      const models = await fetchModelsDevData()
+
+      expect(models.get('openai/gpt-6.1-terra')?.reasoning_options).toEqual(levels)
+      expect(models.get('openai/gpt-6.1-terra')?.limit?.context).toBe(1_050_000)
+      expect(models.get('acme/other')?.reasoning_options).toBeUndefined()
+      expect(models.size).toBe(2)
+      // A bare id from a gateway must stay unambiguous, which is why api.json does not replace models.json.
+      expect(lookupModelsDevData('gpt-6.1-terra', models)?.reasoning_options).toEqual(levels)
+      fetchMock.mockRestore()
+    })
+
+    it.each([
+      ['fails', async () => { throw new Error('network down') }],
+      ['returns an error', async () => new Response('', { status: 500 })],
+      ['returns invalid JSON', async () => new Response('not json')],
+    ])('keeps the models.json data when api.json %s', async (_name, catalogResponse) => {
+      const fetchMock = mockFetch(catalogResponse)
+
+      const models = await fetchModelsDevData()
+
+      expect(models.get('openai/gpt-6.1-terra')?.limit?.context).toBe(1_050_000)
+      expect(models.get('openai/gpt-6.1-terra')?.reasoning_options).toBeUndefined()
+      fetchMock.mockRestore()
+    })
+
+    it('does not use an error response from api.json, even when its body is valid JSON', async () => {
+      const fetchMock = mockFetch(async () => new Response(JSON.stringify(catalog), { status: 503 }))
+
+      const models = await fetchModelsDevData()
+
+      expect(models.get('openai/gpt-6.1-terra')?.limit?.context).toBe(1_050_000)
+      expect(models.get('openai/gpt-6.1-terra')?.reasoning_options).toBeUndefined()
+      fetchMock.mockRestore()
+    })
+
+    it('returns nothing, and does not cache it, when models.json returns an error', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => (
+        String(url) === MODELS_DEV_CATALOG_URL
+          ? new Response(JSON.stringify(catalog))
+          : new Response(JSON.stringify(flat), { status: 503 })
+      ))
+
+      expect((await fetchModelsDevData()).size).toBe(0)
+
+      fetchMock.mockImplementation(async (url) => (
+        new Response(JSON.stringify(String(url) === MODELS_DEV_CATALOG_URL ? catalog : flat))
+      ))
+      expect((await fetchModelsDevData()).size).toBe(2)
+      fetchMock.mockRestore()
+    })
+
+    it('does not read api.json for a custom endpoint, and uses levels the endpoint provides', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
+        'openai/mirrored': { id: 'openai/mirrored', reasoning_options: levels },
+      })))
+
+      const models = await fetchModelsDevData('https://mirror.example/models.json')
+
+      expect(models.get('openai/mirrored')?.reasoning_options).toEqual(levels)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).not.toHaveBeenCalledWith(MODELS_DEV_CATALOG_URL, expect.anything())
+      fetchMock.mockRestore()
+    })
+
+    it('ignores malformed reasoning options', () => {
+      const cache = modelsDevTestUtils.parseModelsDevData({
+        'a/one': { id: 'a/one', reasoning_options: 'high' },
+        'a/two': { id: 'a/two', reasoning_options: [null, { values: ['low'] }, { type: 'effort', values: ['low', 7] }] },
+      })
+
+      expect(cache.get('a/one')?.reasoning_options).toBeUndefined()
+      expect(cache.get('a/two')?.reasoning_options).toEqual([{ type: 'effort', values: ['low'] }])
+    })
   })
 })

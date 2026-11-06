@@ -246,8 +246,11 @@ describe("V2 provider discovery with metadata enrichment", () => {
         settings: { baseURL: "https://aiproxy.example/api" },
       }], options, providerFetcher as unknown as typeof fetch)
 
-      expect(catalogFetcher).toHaveBeenCalledTimes(1)
-      expect(catalogFetcher.mock.calls[0]?.[1]).not.toHaveProperty("headers")
+      expect(catalogFetcher.mock.calls.map(call => call[0])).toEqual([
+        "https://models.dev/models.json",
+        "https://models.dev/api.json",
+      ])
+      for (const call of catalogFetcher.mock.calls) expect(call[1]).not.toHaveProperty("headers")
       const models = inventory.get("aiproxy")!
       expect([...models.keys()]).toEqual(["gpt-6-luna", "unlisted-provider-model"])
       expect(models.get("gpt-6-luna")).toMatchObject({

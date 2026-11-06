@@ -1454,11 +1454,15 @@ describe('ModelDiscovery Plugin', () => {
 
       await pluginHooks.config(config)
 
-      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(mockFetch).toHaveBeenCalledTimes(3)
       expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://models.dev/models.json', expect.objectContaining({
         method: 'GET'
       }))
+      expect(mockFetch).toHaveBeenNthCalledWith(3, 'https://models.dev/api.json', expect.objectContaining({
+        method: 'GET'
+      }))
       expect(mockFetch.mock.calls[1][1]).not.toHaveProperty('headers')
+      expect(mockFetch.mock.calls[2][1]).not.toHaveProperty('headers')
       expect(config.provider.aiproxy.models['gpt-6-luna']).toMatchObject({
         name: 'GPT-6 Luna',
         reasoning: true,

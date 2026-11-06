@@ -1,8 +1,14 @@
+export interface ModelsDevReasoningOption {
+  type: string
+  values?: string[]
+}
+
 export interface ModelsDevModel {
   id: string
   name?: string
   attachment?: boolean
   reasoning?: boolean
+  reasoning_options?: ModelsDevReasoningOption[]
   tool_call?: boolean
   structured_output?: boolean
   temperature?: boolean
@@ -18,6 +24,12 @@ export interface ModelsDevModel {
 }
 
 export const DEFAULT_MODELS_DEV_URL = 'https://models.dev/models.json'
+// models.json says whether a model reasons, but not at which effort levels; only api.json lists them.
+// api.json can't replace it: many providers list the same model there, so a bare model id becomes ambiguous.
+export const MODELS_DEV_CATALOG_URL = 'https://models.dev/api.json'
+const MODELS_DEV_TIMEOUT_MS = 3000
+// api.json is about ten times the size of models.json.
+const MODELS_DEV_CATALOG_TIMEOUT_MS = 8000
 const PREFIX_MATCH_MIN_SCORE = 70
 const PREFIX_MATCH_MIN_SHARED_PARTS = 2
 
@@ -29,6 +41,23 @@ function isObject(value: unknown): value is Record<string, any> {
 
 function toModelId(providerId: string | undefined, modelId: string): string {
   return providerId ? `${providerId}/${modelId}` : modelId
+}
+
+function parseReasoningOptions(value: unknown): ModelsDevReasoningOption[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const options = value
+    .filter((option): option is Record<string, any> => isObject(option) && typeof option.type === 'string')
+    .map((option): ModelsDevReasoningOption => ({
+      type: option.type,
+      ...(Array.isArray(option.values)
+        ? { values: option.values.filter((item: unknown): item is string => typeof item === 'string') }
+        : {}),
+    }))
+
+  return options.length > 0 ? options : undefined
 }
 
 function addModel(cache: Map<string, ModelsDevModel>, providerId: string | undefined, rawModel: Record<string, any>, fallbackModelId?: string): void {
@@ -43,6 +72,7 @@ function addModel(cache: Map<string, ModelsDevModel>, providerId: string | undef
     name: typeof rawModel.name === 'string' ? rawModel.name : undefined,
     attachment: typeof rawModel.attachment === 'boolean' ? rawModel.attachment : undefined,
     reasoning: typeof rawModel.reasoning === 'boolean' ? rawModel.reasoning : undefined,
+    reasoning_options: parseReasoningOptions(rawModel.reasoning_options),
     tool_call: typeof rawModel.tool_call === 'boolean' ? rawModel.tool_call : undefined,
     structured_output: typeof rawModel.structured_output === 'boolean' ? rawModel.structured_output : undefined,
     temperature: typeof rawModel.temperature === 'boolean' ? rawModel.temperature : undefined,
@@ -85,21 +115,55 @@ function parseModelsDevData(data: unknown): Map<string, ModelsDevModel> {
   return cache
 }
 
+// Copies effort levels onto models already in the index, using the provider that owns each model id.
+function addReasoningOptions(models: Map<string, ModelsDevModel>, catalog: unknown): void {
+  if (!isObject(catalog)) {
+    return
+  }
+
+  for (const [id, model] of models) {
+    const separator = id.indexOf('/')
+    if (separator <= 0) {
+      continue
+    }
+
+    const provider = catalog[id.slice(0, separator)]
+    const entry = isObject(provider) && isObject(provider.models) ? provider.models[id.slice(separator + 1)] : undefined
+    const options = isObject(entry) ? parseReasoningOptions(entry.reasoning_options) : undefined
+    if (options) {
+      model.reasoning_options = options
+    }
+  }
+}
+
+async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'GET',
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+
+  return response.ok ? response.json() : undefined
+}
+
 export async function fetchModelsDevData(url: string = DEFAULT_MODELS_DEV_URL): Promise<Map<string, ModelsDevModel>> {
   const cached = modelsDevCaches.get(url)
   if (cached) return cached
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: AbortSignal.timeout(3000),
-    })
+    const [data, catalog] = await Promise.all([
+      fetchJson(url, MODELS_DEV_TIMEOUT_MS),
+      // Effort levels are an extra: without them, models keep the rest of their metadata.
+      url === DEFAULT_MODELS_DEV_URL
+        ? fetchJson(MODELS_DEV_CATALOG_URL, MODELS_DEV_CATALOG_TIMEOUT_MS).catch(() => undefined)
+        : undefined,
+    ])
 
-    if (!response.ok) {
+    if (data === undefined) {
       return new Map()
     }
 
-    const models = parseModelsDevData(await response.json())
+    const models = parseModelsDevData(data)
+    addReasoningOptions(models, catalog)
     modelsDevCaches.set(url, models)
     return models
   } catch {
