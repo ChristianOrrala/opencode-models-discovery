@@ -38,6 +38,7 @@ export function createModelsDevEnricher(data: unknown): ModelEnricher {
         ...(typeof info?.temperature === 'boolean' ? { temperature: info.temperature } : {}),
         ...(info?.modalities ? { modalities: info.modalities } : {}),
         ...(variants ? { variants } : {}),
+        ...(info?.cost ? { cost: info.cost } : {}),
       }
     },
   }

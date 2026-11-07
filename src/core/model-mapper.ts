@@ -170,14 +170,26 @@ export function mapToDiscoveredV2Model(
     if (Array.isArray(resultDraft.cost)) {
       mapped.cost = resultDraft.cost
     } else {
-      mapped.cost = [{
-        input: (resultDraft.cost as Record<string, any>).input ?? 0,
-        output: (resultDraft.cost as Record<string, any>).output ?? 0,
+      const cost = resultDraft.cost as Record<string, any>
+      const base = {
+        input: cost.input ?? 0,
+        output: cost.output ?? 0,
         cache: {
-          read: (resultDraft.cost as Record<string, any>).cache_read ?? (resultDraft.cost as Record<string, any>).cache?.read ?? 0,
-          write: (resultDraft.cost as Record<string, any>).cache_write ?? (resultDraft.cost as Record<string, any>).cache?.write ?? 0,
+          read: cost.cache_read ?? cost.cache?.read ?? 0,
+          write: cost.cache_write ?? cost.cache?.write ?? 0,
         },
-      }]
+      }
+      // A tier keeps every base price it doesn't set.
+      const tiers = (Array.isArray(cost.tiers) ? cost.tiers : []).map((tier: Record<string, any>) => ({
+        tier: tier.tier,
+        input: tier.input ?? base.input,
+        output: tier.output ?? base.output,
+        cache: {
+          read: tier.cache_read ?? base.cache.read,
+          write: tier.cache_write ?? base.cache.write,
+        },
+      }))
+      mapped.cost = [base, ...tiers]
     }
   }
 

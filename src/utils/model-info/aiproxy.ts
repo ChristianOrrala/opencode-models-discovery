@@ -38,8 +38,9 @@ export function createAIProxyEnricher(data: unknown): ModelEnricher {
       const result: any = {
         ...base,
         ...(base.limit ? { limit: { ...base.limit } } : {}),
-        ...(base.cost && typeof base.cost === 'object' ? { cost: { ...(base.cost as Record<string, unknown>) } } : {}),
       }
+      // Prices stay this format's own: a catalog price must not mix with partial inline pricing.
+      delete result.cost
 
       const limits = object(model.limits)
       const inputLimit = limits?.max_input_tokens

@@ -3,12 +3,26 @@ export interface ModelsDevReasoningOption {
   values?: string[]
 }
 
+export interface ModelsDevPrices {
+  input?: number
+  output?: number
+  cache_read?: number
+  cache_write?: number
+}
+
+export interface ModelsDevCost extends ModelsDevPrices {
+  input: number
+  output: number
+  tiers?: Array<ModelsDevPrices & { tier: { type: 'context', size: number } }>
+}
+
 export interface ModelsDevModel {
   id: string
   name?: string
   attachment?: boolean
   reasoning?: boolean
   reasoning_options?: ModelsDevReasoningOption[]
+  cost?: ModelsDevCost
   tool_call?: boolean
   structured_output?: boolean
   temperature?: boolean
@@ -24,7 +38,7 @@ export interface ModelsDevModel {
 }
 
 export const DEFAULT_MODELS_DEV_URL = 'https://models.dev/models.json'
-// models.json says whether a model reasons, but not at which effort levels; only api.json lists them.
+// models.json says whether a model reasons, but not at which effort levels or prices; only api.json lists them.
 // api.json can't replace it: many providers list the same model there, so a bare model id becomes ambiguous.
 export const MODELS_DEV_CATALOG_URL = 'https://models.dev/api.json'
 const MODELS_DEV_TIMEOUT_MS = 3000
@@ -60,6 +74,37 @@ function parseReasoningOptions(value: unknown): ModelsDevReasoningOption[] | und
   return options.length > 0 ? options : undefined
 }
 
+function parsePrices(value: Record<string, any>): ModelsDevPrices {
+  const prices: ModelsDevPrices = {}
+  for (const key of ['input', 'output', 'cache_read', 'cache_write'] as const) {
+    if (typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0) {
+      prices[key] = value[key]
+    }
+  }
+  return prices
+}
+
+function parseCost(value: unknown): ModelsDevCost | undefined {
+  if (!isObject(value)) {
+    return undefined
+  }
+
+  const { input, output, ...cache } = parsePrices(value)
+  if (input === undefined || output === undefined) {
+    return undefined
+  }
+
+  // Only context tiers: OpenCode's cost has no place for other conditions, such as the service tier.
+  const tiers = (Array.isArray(value.tiers) ? value.tiers : []).flatMap((tier: unknown) => {
+    if (!isObject(tier) || !isObject(tier.tier) || tier.tier.type !== 'context' || typeof tier.tier.size !== 'number') {
+      return []
+    }
+    return [{ ...parsePrices(tier), tier: { type: 'context' as const, size: tier.tier.size } }]
+  })
+
+  return { input, output, ...cache, ...(tiers.length > 0 ? { tiers } : {}) }
+}
+
 function addModel(cache: Map<string, ModelsDevModel>, providerId: string | undefined, rawModel: Record<string, any>, fallbackModelId?: string): void {
   const rawId = typeof rawModel.id === 'string' && rawModel.id.length > 0 ? rawModel.id : fallbackModelId
   if (!rawId) {
@@ -73,6 +118,7 @@ function addModel(cache: Map<string, ModelsDevModel>, providerId: string | undef
     attachment: typeof rawModel.attachment === 'boolean' ? rawModel.attachment : undefined,
     reasoning: typeof rawModel.reasoning === 'boolean' ? rawModel.reasoning : undefined,
     reasoning_options: parseReasoningOptions(rawModel.reasoning_options),
+    cost: parseCost(rawModel.cost),
     tool_call: typeof rawModel.tool_call === 'boolean' ? rawModel.tool_call : undefined,
     structured_output: typeof rawModel.structured_output === 'boolean' ? rawModel.structured_output : undefined,
     temperature: typeof rawModel.temperature === 'boolean' ? rawModel.temperature : undefined,
@@ -115,8 +161,8 @@ function parseModelsDevData(data: unknown): Map<string, ModelsDevModel> {
   return cache
 }
 
-// Copies effort levels onto models already in the index, using the provider that owns each model id.
-function addReasoningOptions(models: Map<string, ModelsDevModel>, catalog: unknown): void {
+// Copies effort levels and prices onto models already in the index, using the provider that owns each model id.
+function addCatalogDetails(models: Map<string, ModelsDevModel>, catalog: unknown): void {
   if (!isObject(catalog)) {
     return
   }
@@ -132,6 +178,10 @@ function addReasoningOptions(models: Map<string, ModelsDevModel>, catalog: unkno
     const options = isObject(entry) ? parseReasoningOptions(entry.reasoning_options) : undefined
     if (options) {
       model.reasoning_options = options
+    }
+    const cost = isObject(entry) ? parseCost(entry.cost) : undefined
+    if (cost) {
+      model.cost = cost
     }
   }
 }
@@ -152,7 +202,7 @@ export async function fetchModelsDevData(url: string = DEFAULT_MODELS_DEV_URL): 
   try {
     const [data, catalog] = await Promise.all([
       fetchJson(url, MODELS_DEV_TIMEOUT_MS),
-      // Effort levels are an extra: without them, models keep the rest of their metadata.
+      // Effort levels and prices are extras: without them, models keep the rest of their metadata.
       url === DEFAULT_MODELS_DEV_URL
         ? fetchJson(MODELS_DEV_CATALOG_URL, MODELS_DEV_CATALOG_TIMEOUT_MS).catch(() => undefined)
         : undefined,
@@ -163,7 +213,7 @@ export async function fetchModelsDevData(url: string = DEFAULT_MODELS_DEV_URL): 
     }
 
     const models = parseModelsDevData(data)
-    addReasoningOptions(models, catalog)
+    addCatalogDetails(models, catalog)
     modelsDevCaches.set(url, models)
     return models
   } catch {

@@ -183,6 +183,48 @@ describe('models.dev fetcher', () => {
       })
     }
 
+    it('adds prices by exact provider and model, with context tiers only', async () => {
+      const cost = {
+        input: 1,
+        output: 5,
+        cache_read: 0.05,
+        cache_write: 1.25,
+        tiers: [
+          { input: 2, output: 7.5, cache_read: 0.1, cache_write: 2.5, tier: { type: 'context', size: 272_000 } },
+          { input: 9, output: 9, tier: { type: 'service', size: 1 } },
+          { input: 9, output: 9 },
+        ],
+        context_over_200k: { input: 2, output: 7.5 },
+      }
+      const priced = {
+        openai: { models: { 'gpt-6.1-terra': { id: 'gpt-6.1-terra', cost } } },
+        azure: { models: { 'gpt-6.1-terra': { id: 'gpt-6.1-terra', cost: { input: 99, output: 99 } } } },
+      }
+      const fetchMock = mockFetch(async () => new Response(JSON.stringify(priced)))
+
+      const models = await fetchModelsDevData()
+
+      expect(models.get('openai/gpt-6.1-terra')?.cost).toEqual({
+        input: 1,
+        output: 5,
+        cache_read: 0.05,
+        cache_write: 1.25,
+        tiers: [{ input: 2, output: 7.5, cache_read: 0.1, cache_write: 2.5, tier: { type: 'context', size: 272_000 } }],
+      })
+      expect(models.get('acme/other')?.cost).toBeUndefined()
+      fetchMock.mockRestore()
+    })
+
+    it('ignores a price without both input and output, or with a bad number', async () => {
+      const priced = {
+        openai: { models: { 'gpt-6.1-terra': { id: 'gpt-6.1-terra', cost: { input: 1, output: 'free' } } } },
+      }
+      const fetchMock = mockFetch(async () => new Response(JSON.stringify(priced)))
+
+      expect((await fetchModelsDevData()).get('openai/gpt-6.1-terra')?.cost).toBeUndefined()
+      fetchMock.mockRestore()
+    })
+
     it('adds them by exact provider and model, without adding models', async () => {
       const fetchMock = mockFetch(async () => new Response(JSON.stringify(catalog)))
 

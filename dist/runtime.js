@@ -972,14 +972,25 @@ function mapToDiscoveredV2Model(draft, options) {
     if (Array.isArray(resultDraft.cost)) {
       mapped.cost = resultDraft.cost;
     } else {
-      mapped.cost = [{
-        input: resultDraft.cost.input ?? 0,
-        output: resultDraft.cost.output ?? 0,
+      const cost = resultDraft.cost;
+      const base = {
+        input: cost.input ?? 0,
+        output: cost.output ?? 0,
         cache: {
-          read: resultDraft.cost.cache_read ?? resultDraft.cost.cache?.read ?? 0,
-          write: resultDraft.cost.cache_write ?? resultDraft.cost.cache?.write ?? 0
+          read: cost.cache_read ?? cost.cache?.read ?? 0,
+          write: cost.cache_write ?? cost.cache?.write ?? 0
         }
-      }];
+      };
+      const tiers = (Array.isArray(cost.tiers) ? cost.tiers : []).map((tier) => ({
+        tier: tier.tier,
+        input: tier.input ?? base.input,
+        output: tier.output ?? base.output,
+        cache: {
+          read: tier.cache_read ?? base.cache.read,
+          write: tier.cache_write ?? base.cache.write
+        }
+      }));
+      mapped.cost = [base, ...tiers];
     }
   }
   return mapped;
@@ -1425,6 +1436,33 @@ function parseReasoningOptions(value) {
   return options.length > 0 ? options : void 0;
 }
 __name(parseReasoningOptions, "parseReasoningOptions");
+function parsePrices(value) {
+  const prices = {};
+  for (const key2 of ["input", "output", "cache_read", "cache_write"]) {
+    if (typeof value[key2] === "number" && Number.isFinite(value[key2]) && value[key2] >= 0) {
+      prices[key2] = value[key2];
+    }
+  }
+  return prices;
+}
+__name(parsePrices, "parsePrices");
+function parseCost(value) {
+  if (!isObject(value)) {
+    return void 0;
+  }
+  const { input, output, ...cache } = parsePrices(value);
+  if (input === void 0 || output === void 0) {
+    return void 0;
+  }
+  const tiers = (Array.isArray(value.tiers) ? value.tiers : []).flatMap((tier) => {
+    if (!isObject(tier) || !isObject(tier.tier) || tier.tier.type !== "context" || typeof tier.tier.size !== "number") {
+      return [];
+    }
+    return [{ ...parsePrices(tier), tier: { type: "context", size: tier.tier.size } }];
+  });
+  return { input, output, ...cache, ...tiers.length > 0 ? { tiers } : {} };
+}
+__name(parseCost, "parseCost");
 function addModel(cache, providerId, rawModel, fallbackModelId) {
   const rawId = typeof rawModel.id === "string" && rawModel.id.length > 0 ? rawModel.id : fallbackModelId;
   if (!rawId) {
@@ -1437,6 +1475,7 @@ function addModel(cache, providerId, rawModel, fallbackModelId) {
     attachment: typeof rawModel.attachment === "boolean" ? rawModel.attachment : void 0,
     reasoning: typeof rawModel.reasoning === "boolean" ? rawModel.reasoning : void 0,
     reasoning_options: parseReasoningOptions(rawModel.reasoning_options),
+    cost: parseCost(rawModel.cost),
     tool_call: typeof rawModel.tool_call === "boolean" ? rawModel.tool_call : void 0,
     structured_output: typeof rawModel.structured_output === "boolean" ? rawModel.structured_output : void 0,
     temperature: typeof rawModel.temperature === "boolean" ? rawModel.temperature : void 0,
@@ -1474,7 +1513,7 @@ function parseModelsDevData(data) {
   return cache;
 }
 __name(parseModelsDevData, "parseModelsDevData");
-function addReasoningOptions(models, catalog) {
+function addCatalogDetails(models, catalog) {
   if (!isObject(catalog)) {
     return;
   }
@@ -1489,9 +1528,13 @@ function addReasoningOptions(models, catalog) {
     if (options) {
       model.reasoning_options = options;
     }
+    const cost = isObject(entry) ? parseCost(entry.cost) : void 0;
+    if (cost) {
+      model.cost = cost;
+    }
   }
 }
-__name(addReasoningOptions, "addReasoningOptions");
+__name(addCatalogDetails, "addCatalogDetails");
 async function fetchJson(url, timeoutMs) {
   const response = await fetch(url, {
     method: "GET",
@@ -1506,14 +1549,14 @@ async function fetchModelsDevData(url = DEFAULT_MODELS_DEV_URL) {
   try {
     const [data, catalog] = await Promise.all([
       fetchJson(url, MODELS_DEV_TIMEOUT_MS),
-      // Effort levels are an extra: without them, models keep the rest of their metadata.
+      // Effort levels and prices are extras: without them, models keep the rest of their metadata.
       url === DEFAULT_MODELS_DEV_URL ? fetchJson(MODELS_DEV_CATALOG_URL, MODELS_DEV_CATALOG_TIMEOUT_MS).catch(() => void 0) : void 0
     ]);
     if (data === void 0) {
       return /* @__PURE__ */ new Map();
     }
     const models = parseModelsDevData(data);
-    addReasoningOptions(models, catalog);
+    addCatalogDetails(models, catalog);
     modelsDevCaches.set(url, models);
     return models;
   } catch {
@@ -1610,7 +1653,8 @@ function createModelsDevEnricher(data) {
         ...typeof info?.structured_output === "boolean" ? { structuredOutput: info.structured_output } : {},
         ...typeof info?.temperature === "boolean" ? { temperature: info.temperature } : {},
         ...info?.modalities ? { modalities: info.modalities } : {},
-        ...variants ? { variants } : {}
+        ...variants ? { variants } : {},
+        ...info?.cost ? { cost: info.cost } : {}
       };
     }
   };
@@ -1778,9 +1822,9 @@ function createAIProxyEnricher(data) {
       const base = modelsDevEnricher.enrich(model, context);
       const result = {
         ...base,
-        ...base.limit ? { limit: { ...base.limit } } : {},
-        ...base.cost && typeof base.cost === "object" ? { cost: { ...base.cost } } : {}
+        ...base.limit ? { limit: { ...base.limit } } : {}
       };
+      delete result.cost;
       const limits = object(model.limits);
       const inputLimit = limits?.max_input_tokens;
       const outputLimit = limits?.max_output_tokens;

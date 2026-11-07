@@ -14,6 +14,34 @@ function terra(reasoning_options?: Array<{ type: string, values?: string[] }>) {
 }
 
 describe('native models.dev enricher', () => {
+  it('gives OpenCode the price of each context tier, each tier keeping the base prices it does not set', () => {
+    const enrichment = createModelsDevEnricher(new Map([
+      ['openai/gpt-6.1-terra', {
+        id: 'openai/gpt-6.1-terra',
+        cost: {
+          input: 1,
+          output: 5,
+          cache_read: 0.05,
+          cache_write: 1.25,
+          tiers: [{ input: 2, cache_read: 0.1, tier: { type: 'context' as const, size: 272_000 } }],
+        },
+      }],
+    ])).enrich({ id: 'gpt-6.1-terra' }, { filterNonChat: true })
+
+    expect(mapToDiscoveredV2Model({ id: 'gpt-6.1-terra', raw: { id: 'gpt-6.1-terra' }, ...enrichment } as never, { smartModelName: false }).cost).toEqual([
+      { input: 1, output: 5, cache: { read: 0.05, write: 1.25 } },
+      { tier: { type: 'context', size: 272_000 }, input: 2, output: 5, cache: { read: 0.1, write: 1.25 } },
+    ])
+  })
+
+  it('sets no cost for a model without a price', () => {
+    const enrichment = createModelsDevEnricher(new Map([
+      ['openai/gpt-5', { id: 'openai/gpt-5' }],
+    ])).enrich({ id: 'gpt-5' }, { filterNonChat: true })
+
+    expect(enrichment).not.toHaveProperty('cost')
+  })
+
   it('returns neutral metadata without a host-shaped config object', () => {
     const enricher = createModelsDevEnricher(new Map([
       ['openai/gpt-5', {
